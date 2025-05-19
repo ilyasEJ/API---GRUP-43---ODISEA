@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
 import models
+from models import Restaurante
 from database import SessionLocal, engine
 from schemas import (
     SocioCreate, SocioResponse,
@@ -123,6 +124,16 @@ def obtener_socio(socio_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Socio no encontrado")
     return socio
 
+
+@app.get("/socios/email/{email}", response_model=SocioResponse)
+def obtener_socio_por_email(email: str, db: Session = Depends(get_db)):
+    socio = db.query(models.Socio).filter(models.Socio.email == email).first()
+    if not socio:
+        raise HTTPException(status_code=404, detail="Socio no encontrado")
+    return socio
+
+
+
 @app.delete("/socios/{socio_id}")
 def eliminar_socio(socio_id: int, db: Session = Depends(get_db)):
     socio = db.query(models.Socio).filter(models.Socio.id == socio_id).first()
@@ -196,23 +207,102 @@ def eliminar_favorito(socio_id: int, referencia_id: int, db: Session = Depends(g
 # Reservas
 @app.get("/reservas_hotel/{socio_id}")
 def obtener_reservas_hotel(socio_id: int, db: Session = Depends(get_db)):
-    reservas = db.query(models.ReservaHotel).filter(models.ReservaHotel.socio_id == socio_id).all()
-    return reservas
+    reservas = (
+        db.query(models.ReservaHotel, models.Lugar.nombre)
+        .join(models.Habitacion, models.ReservaHotel.habitacion_id == models.Habitacion.id)
+        .join(models.Lugar, models.Habitacion.hotel_id == models.Lugar.id)
+        .filter(models.ReservaHotel.socio_id == socio_id)
+        .all()
+    )
+
+    resultado = [
+        {
+            "id": r.ReservaHotel.id,
+            "tipo": "Hotel",
+            "nombre_lugar": r.nombre,
+            "fecha_entrada": r.ReservaHotel.fecha_entrada,
+            "fecha_salida": r.ReservaHotel.fecha_salida,
+            "habitacion_id": r.ReservaHotel.habitacion_id
+        }
+        for r in reservas
+    ]
+
+    return resultado
 
 @app.get("/reservas_pista/{socio_id}")
 def obtener_reservas_pista(socio_id: int, db: Session = Depends(get_db)):
-    reservas = db.query(models.ReservaPista).filter(models.ReservaPista.socio_id == socio_id).all()
-    return reservas
+    reservas = (
+        db.query(models.ReservaPista, models.Lugar.nombre)
+        .join(models.ServicioPista, models.ReservaPista.servicio_pista_id == models.ServicioPista.id)
+        .join(models.Lugar, models.ServicioPista.pista_id == models.Lugar.id)
+        .filter(models.ReservaPista.socio_id == socio_id)
+        .all()
+    )
+
+    resultado = [
+        {
+            "id": r.ReservaPista.id,
+            "tipo": "Pista",
+            "nombre_lugar": r.nombre,
+            "fecha": r.ReservaPista.fecha
+        }
+        for r in reservas
+    ]
+
+    return resultado
 
 @app.get("/reservas_restaurante/{socio_id}")
 def obtener_reservas_restaurante(socio_id: int, db: Session = Depends(get_db)):
-    reservas = db.query(models.ReservaRestaurante).filter(models.ReservaRestaurante.socio_id == socio_id).all()
-    return reservas
+    reservas = (
+        db.query(models.ReservaRestaurante, models.Lugar.nombre)
+        .join(models.ServicioRestaurante, models.ReservaRestaurante.servicio_restaurante_id == models.ServicioRestaurante.id)
+        .join(models.Lugar, models.ServicioRestaurante.restaurante_id == models.Lugar.id)
+        .filter(models.ReservaRestaurante.socio_id == socio_id)
+        .all()
+    )
+
+    resultado = [
+        {
+            "id": r.ReservaRestaurante.id,
+            "tipo": "Restaurante",
+            "nombre_lugar": r.nombre,
+            "fecha": r.ReservaRestaurante.fecha,
+            "hora": r.ReservaRestaurante.hora
+        }
+        for r in reservas
+    ]
+
+    return resultado
 
 @app.get("/reservas_spa/{socio_id}")
 def obtener_reservas_spa(socio_id: int, db: Session = Depends(get_db)):
-    reservas = db.query(models.ReservaSpa).filter(models.ReservaSpa.socio_id == socio_id).all()
-    return reservas
+    reservas = (
+        db.query(models.ReservaSpa, models.Lugar.nombre)
+        .join(models.ServicioSpa, models.ReservaSpa.servicio_spa_id == models.ServicioSpa.id)
+        .join(models.Lugar, models.ServicioSpa.spa_id == models.Lugar.id)
+        .filter(models.ReservaSpa.socio_id == socio_id)
+        .all()
+    )
+
+    resultado = [
+        {
+            "id": r.ReservaSpa.id,
+            "tipo": "Spa",
+            "nombre_lugar": r.nombre,
+            "fecha": r.ReservaSpa.fecha,
+            "hora": r.ReservaSpa.hora
+        }
+        for r in reservas
+    ]
+
+    return resultado
+
+@app.get("/restaurantes/nombre/{nombre}")
+def get_restaurante_por_nombre(nombre: str, db: Session = Depends(get_db)):
+    restaurante = db.query(Restaurante).filter(Restaurante.nombre == nombre).first()
+    if not restaurante:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    return restaurante
 
 # Información básica de lugares
 @app.get("/hotel/{hotel_id}", response_model=HotelResponse)
@@ -401,3 +491,52 @@ def buscar_lugares(query: str, categoria: str, db: Session = Depends(get_db)):
 
     else:
         raise HTTPException(status_code=400, detail="Categoría no válida")
+
+#Endpoint para eliminar reservas
+@app.delete("/reserva/hotel/{socio_id}/{lugar_id}")
+def cancelar_reserva_hotel(socio_id: int, lugar_id: int, db: Session = Depends(get_db)):
+    reserva = db.query(models.ReservaHotel).filter(
+        models.ReservaHotel.socio_id == socio_id,
+        models.ReservaHotel.hotel_id == lugar_id
+    ).first()
+    if not reserva:
+        raise HTTPException(status_code=404, detail="Reserva de hotel no encontrada")
+    db.delete(reserva)
+    db.commit()
+    return {"detail": "Reserva de hotel cancelada"}
+
+@app.delete("/reserva/restaurante/{socio_id}/{lugar_id}")
+def cancelar_reserva_restaurante(socio_id: int, lugar_id: int, db: Session = Depends(get_db)):
+    reserva = db.query(models.ReservaRestaurante).filter(
+        models.ReservaRestaurante.socio_id == socio_id,
+        models.ReservaRestaurante.restaurante_id == lugar_id
+    ).first()
+    if not reserva:
+        raise HTTPException(status_code=404, detail="Reserva de restaurante no encontrada")
+    db.delete(reserva)
+    db.commit()
+    return {"detail": "Reserva de restaurante cancelada"}
+
+@app.delete("/reserva/spa/{socio_id}/{lugar_id}")
+def cancelar_reserva_spa(socio_id: int, lugar_id: int, db: Session = Depends(get_db)):
+    reserva = db.query(models.ReservaSpa).filter(
+        models.ReservaSpa.socio_id == socio_id,
+        models.ReservaSpa.spa_id == lugar_id
+    ).first()
+    if not reserva:
+        raise HTTPException(status_code=404, detail="Reserva de spa no encontrada")
+    db.delete(reserva)
+    db.commit()
+    return {"detail": "Reserva de spa cancelada"}
+
+@app.delete("/reserva/pista/{socio_id}/{lugar_id}")
+def cancelar_reserva_pista(socio_id: int, lugar_id: int, db: Session = Depends(get_db)):
+    reserva = db.query(models.ReservaPista).filter(
+        models.ReservaPista.socio_id == socio_id,
+        models.ReservaPista.pista_id == lugar_id
+    ).first()
+    if not reserva:
+        raise HTTPException(status_code=404, detail="Reserva de pista no encontrada")
+    db.delete(reserva)
+    db.commit()
+    return {"detail": "Reserva de pista cancelada"}
